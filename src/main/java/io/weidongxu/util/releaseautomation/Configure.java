@@ -5,6 +5,10 @@ public class Configure {
     // the service name at https://github.com/Azure/azure-rest-api-specs/tree/main/specification
     private String swagger;
 
+    // URL of the tspconfig.yaml file
+    // e.g. https://github.com/Azure/azure-rest-api-specs/blob/042e4045dedff4baaf5ae551bf6c8087fbdacd40/specification/deviceregistry/DeviceRegistry.Management/tspconfig.yaml
+    private String tspConfig;
+
     // preview release
     private boolean autoVersioning = true;
 
@@ -80,5 +84,13 @@ public class Configure {
 
     public void setTests(Boolean tests) {
         this.tests = tests;
+    }
+
+    public String getTspConfig() {
+        return tspConfig;
+    }
+
+    public void setTspConfig(String tspConfig) {
+        this.tspConfig = tspConfig;
     }
 }

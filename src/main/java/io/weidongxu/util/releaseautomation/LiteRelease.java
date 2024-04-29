@@ -76,12 +76,10 @@ public class LiteRelease {
     private static final String GITHUB_ORGANIZATION = "Azure";
     private static final String GITHUB_PROJECT = "azure-sdk-for-java";
 
-    private static final int LITE_CODEGEN_PIPELINE_ID = 2238;
 
     private static final String CI_CHECK_ENFORCER_NAME = "https://aka.ms/azsdk/checkenforcer";
     private static final String CI_PREPARE_PIPELINES_NAME = "prepare-pipelines";
 
-    private static final String API_SPECS_YAML_PATH = "https://raw.githubusercontent.com/Azure/azure-sdk-for-java/main/eng/mgmt/automation/api-specs.yaml";
 
     private static final String MAVEN_ARTIFACT_PATH_PREFIX = "https://central.sonatype.com/artifact/com.azure.resourcemanager/";
 
@@ -89,7 +87,6 @@ public class LiteRelease {
     private static final PrintStream OUT = System.out;
 
     private static final boolean PROMPT_CONFIRMATION = true;
-    private static final boolean PREFER_STABLE_TAG = false;
 
     private static final PullRequestParameters PR_LIST_PARAMS = ImmutablePullRequestParameters.builder()
             .state("open").page(1).per_page(10).build();
@@ -101,65 +98,8 @@ public class LiteRelease {
         TokenCredential tokenCredential = new BasicAuthenticationCredential(USER, PASS);
 
         Configure configure = getConfigure();
-        String swagger = configure.getSwagger();
-        String sdk = getSdkName(swagger);
-        if (!CoreUtils.isNullOrEmpty(configure.getService())) {
-            sdk = configure.getService();
-        }
 
-        OUT.println("swagger: " + swagger);
-        OUT.println("sdk: " + sdk);
-
-        String tag = configure.getTag();
-        if (CoreUtils.isNullOrEmpty(tag)) {
-            ReadmeConfigure readmeConfigure = Utils.getReadmeConfigure(HTTP_PIPELINE, swagger);
-            readmeConfigure.print(OUT, 3);
-
-            tag = readmeConfigure.getDefaultTag();
-            if (tag == null) {
-                tag = readmeConfigure.getTagConfigures().iterator().next().getTagName();
-            }
-            if (PREFER_STABLE_TAG) {
-                if (tag.endsWith("-preview")) {
-                    Optional<String> stableTag = readmeConfigure.getTagConfigures().stream()
-                            .map(ReadmeConfigure.TagConfigure::getTagName)
-                            .filter(name -> !name.endsWith("-preview"))
-                            .findFirst();
-                    if (stableTag.isPresent()) {
-                        tag = stableTag.get();
-                    }
-                }
-            }
-            OUT.println("choose tag: " + tag + ". Override?");
-            Scanner s = new Scanner(IN);
-            String input = s.nextLine();
-            if (!input.trim().isEmpty()) {
-                tag = input.trim();
-            }
-        }
-        OUT.println("tag: " + tag);
-
-        if (configure.isAutoVersioning() && !tag.contains("-preview")) {
-            ReadmeConfigure readmeConfigure = Utils.getReadmeConfigure(HTTP_PIPELINE, swagger);
-            final String tagToRelease = tag;
-            Optional<ReadmeConfigure.TagConfigure> tagConfigure = readmeConfigure.getTagConfigures().stream()
-                    .filter(t -> Objects.equals(tagToRelease, t.getTagName()))
-                    .findFirst();
-            boolean previewInputFileInTag = tagConfigure.isPresent()
-                    && tagConfigure.get().getInputFiles().stream().anyMatch(f -> f.contains("/preview/"));
-
-            if (!previewInputFileInTag) {
-                // if stable is released, and current tag is also stable
-                VersionConfigure.parseVersion(HTTP_PIPELINE, sdk).ifPresent(sdkVersion -> {
-                    if (sdkVersion.isStableReleased()) {
-                        configure.setAutoVersioning(false);
-                        configure.setVersion(sdkVersion.getCurrentVersionAsStable());
-
-                        OUT.println("release for stable: " + configure.getVersion());
-                    }
-                });
-            }
-        }
+        LiteReleaseMetadata metadata = LiteReleaseMetadata.fromConfigure(configure);
 
         DevManager manager = DevManager.configure()
                 .withLogOptions(new HttpLogOptions().setLogLevel(HttpLogDetailLevel.NONE))
@@ -172,42 +112,25 @@ public class LiteRelease {
         GitHubClient github = GitHubClient.create(new URI("https://api.github.com/"), GITHUB_TOKEN);
         RepositoryClient client = github.createRepositoryClient(GITHUB_ORGANIZATION, GITHUB_PROJECT);
 
-        Map<String, Variable> variables = new HashMap<>();
-        variables.put("README", new Variable().withValue(swagger));
-        variables.put("TAG", new Variable().withValue(tag));
-//        variables.put("DRAFT_PULL_REQUEST", new Variable().withValue("false"));
-        if (!configure.isAutoVersioning()) {
-            variables.put("VERSION", new Variable().withValue(configure.getVersion()));
-        }
-        if (!CoreUtils.isNullOrEmpty(configure.getService())) {
-            variables.put("SERVICE", new Variable().withValue(configure.getService()));
-        }
-        if (!CoreUtils.isNullOrEmpty(configure.getSuffix())) {
-            variables.put("SUFFIX", new Variable().withValue(configure.getSuffix()));
-        }
-        if (configure.getTests() == Boolean.TRUE) {
-            variables.put("AUTOREST_OPTIONS", new Variable().withValue("--generate-tests"));
-        }
-
-        runLiteCodegen(manager, variables);
+        runLiteCodegen(manager, metadata.generationPipelineId(), metadata.generationPipelineVariables());
         OUT.println("wait 1 minutes");
         Thread.sleep(POLL_SHORT_INTERVAL_MINUTE * MILLISECOND_PER_MINUTE);
 
-        mergeGithubPR(client, manager, swagger, sdk);
+        mergeGithubPR(client, manager, metadata.generationSource(), metadata.sdkName());
 
-        runLiteRelease(manager, sdk);
+        runLiteRelease(manager, metadata.sdkName());
 
-        mergeGithubVersionPR(client, sdk);
+        mergeGithubVersionPR(client, metadata.sdkName());
 
-        String sdkMavenUrl = MAVEN_ARTIFACT_PATH_PREFIX + "azure-resourcemanager-" + sdk + "/1.0.0-beta.1/versions";
+        String sdkMavenUrl = MAVEN_ARTIFACT_PATH_PREFIX + "azure-resourcemanager-" + metadata.sdkName() + "/1.0.0-beta.1/versions";
         Utils.openUrl(sdkMavenUrl);
 
         System.exit(0);
     }
 
-    private static void runLiteCodegen(DevManager manager, Map<String, Variable> variables) throws InterruptedException {
+    private static void runLiteCodegen(DevManager manager, int pipelineId, Map<String, Variable> variables) throws InterruptedException {
         // run pipeline
-        Run run = manager.runs().runPipeline(ORGANIZATION, PROJECT_INTERNAL, LITE_CODEGEN_PIPELINE_ID,
+        Run run = manager.runs().runPipeline(ORGANIZATION, PROJECT_INTERNAL, pipelineId,
                 new RunPipelineParameters().withVariables(variables));
         int buildId = run.id();
 
@@ -218,7 +141,7 @@ public class LiteRelease {
             OUT.println("wait 1 minutes");
             Thread.sleep(POLL_SHORT_INTERVAL_MINUTE * MILLISECOND_PER_MINUTE);
 
-            run = manager.runs().get(ORGANIZATION, PROJECT_INTERNAL, LITE_CODEGEN_PIPELINE_ID, buildId);
+            run = manager.runs().get(ORGANIZATION, PROJECT_INTERNAL, pipelineId, buildId);
         }
     }
 
@@ -493,43 +416,6 @@ public class LiteRelease {
             }
             checkRunResult = Utils.getCheckRuns(HTTP_PIPELINE, GITHUB_TOKEN, commitSHA);
             check = getCheck(checkRunResult.getCheckRuns(), checkName);
-        }
-    }
-
-    private static String getSdkName(String swaggerName) {
-        Matcher matcher = Pattern.compile("specification/([^/]+)/resource-manager(/.*)*/readme.md")
-                .matcher(swaggerName);
-        if (matcher.matches()) {
-            swaggerName = matcher.group(1);
-            String subspec = matcher.group(2);
-            if (!CoreUtils.isNullOrEmpty(subspec)) {
-                swaggerName += subspec;
-            }
-        }
-
-        HttpRequest request = new HttpRequest(HttpMethod.GET, API_SPECS_YAML_PATH);
-        HttpResponse response = HTTP_PIPELINE.send(request).block();
-        if (response.getStatusCode() == 200) {
-            String configYaml = response.getBodyAsString().block();
-            response.close();
-
-            Yaml yaml = new Yaml();
-            Map<String, Object> config = yaml.load(configYaml);
-
-            String sdkName = swaggerName;
-            if (config.containsKey(swaggerName)) {
-                Map<String, String> detail = (Map<String, String>) config.get(swaggerName);
-                if (detail.containsKey("service")) {
-                    sdkName = detail.get("service");
-                }
-            }
-
-            sdkName = sdkName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "");
-
-            return sdkName;
-        } else {
-            response.close();
-            throw new HttpResponseException(response);
         }
     }
 
