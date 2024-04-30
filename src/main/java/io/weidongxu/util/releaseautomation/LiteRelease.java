@@ -93,6 +93,7 @@ public class LiteRelease {
     private static final long POLL_SHORT_INTERVAL_MINUTE = 1;
     private static final long POLL_LONG_INTERVAL_MINUTE = 5;
     private static final long MILLISECOND_PER_MINUTE = 60 * 1000;
+    private static final int LITE_CODEGEN_PIPELINE_ID = 2238;
 
     public static void main(String[] args) throws Exception {
         TokenCredential tokenCredential = new BasicAuthenticationCredential(USER, PASS);
@@ -102,7 +103,7 @@ public class LiteRelease {
         LiteReleaseMetadata metadata = LiteReleaseMetadata.fromConfigure(configure);
 
         DevManager manager = DevManager.configure()
-                .withLogOptions(new HttpLogOptions().setLogLevel(HttpLogDetailLevel.NONE))
+                .withLogOptions(new HttpLogOptions().setLogLevel(HttpLogDetailLevel.BODY_AND_HEADERS))
                 .withPolicy(new BasicAuthAuthenticationPolicy(tokenCredential))
 //                .withPolicy(new HttpDebugLoggingPolicy())
                 .authenticate(
@@ -112,7 +113,7 @@ public class LiteRelease {
         GitHubClient github = GitHubClient.create(new URI("https://api.github.com/"), GITHUB_TOKEN);
         RepositoryClient client = github.createRepositoryClient(GITHUB_ORGANIZATION, GITHUB_PROJECT);
 
-        runLiteCodegen(manager, metadata.generationPipelineId(), metadata.generationPipelineVariables());
+        runLiteCodegen(manager, metadata.generationPipelineVariables());
         OUT.println("wait 1 minutes");
         Thread.sleep(POLL_SHORT_INTERVAL_MINUTE * MILLISECOND_PER_MINUTE);
 
@@ -128,9 +129,9 @@ public class LiteRelease {
         System.exit(0);
     }
 
-    private static void runLiteCodegen(DevManager manager, int pipelineId, Map<String, Variable> variables) throws InterruptedException {
+    private static void runLiteCodegen(DevManager manager, Map<String, Variable> variables) throws InterruptedException {
         // run pipeline
-        Run run = manager.runs().runPipeline(ORGANIZATION, PROJECT_INTERNAL, pipelineId,
+        Run run = manager.runs().runPipeline(ORGANIZATION, PROJECT_INTERNAL, LITE_CODEGEN_PIPELINE_ID,
                 new RunPipelineParameters().withVariables(variables));
         int buildId = run.id();
 
@@ -141,16 +142,16 @@ public class LiteRelease {
             OUT.println("wait 1 minutes");
             Thread.sleep(POLL_SHORT_INTERVAL_MINUTE * MILLISECOND_PER_MINUTE);
 
-            run = manager.runs().get(ORGANIZATION, PROJECT_INTERNAL, pipelineId, buildId);
+            run = manager.runs().get(ORGANIZATION, PROJECT_INTERNAL, LITE_CODEGEN_PIPELINE_ID, buildId);
         }
     }
 
-    private static void mergeGithubPR(RepositoryClient client, DevManager manager, String swagger, String sdk) throws InterruptedException, ExecutionException {
+    private static void mergeGithubPR(RepositoryClient client, DevManager manager, String source, String sdkName) throws InterruptedException, ExecutionException {
         PullRequestClient prClient = client.createPullRequestClient();
         List<PullRequestItem> prs = prClient.list(PR_LIST_PARAMS).get();
 
         PullRequestItem pr = prs.stream()
-                .filter(p -> p.title().startsWith("[Automation] Generate Fluent Lite from") && p.title().contains(swagger))
+                .filter(p -> p.title().startsWith("[Automation] Generate Fluent Lite from") && p.title().contains(source))
                 .findFirst().orElse(null);
 
         if (pr != null) {
@@ -161,7 +162,7 @@ public class LiteRelease {
             Utils.openUrl(prUrl);
 
             // wait for CI
-            waitForChecks(client, prClient, manager, prNumber, sdk);
+            waitForChecks(client, prClient, manager, prNumber, sdkName);
 
             if (PROMPT_CONFIRMATION) {
                 Utils.promptMessageAndWait(IN, OUT,

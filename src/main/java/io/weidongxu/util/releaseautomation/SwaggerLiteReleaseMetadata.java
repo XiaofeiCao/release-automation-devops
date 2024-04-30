@@ -1,34 +1,24 @@
 package io.weidongxu.util.releaseautomation;
 
-import com.azure.core.exception.HttpResponseException;
-import com.azure.core.http.HttpMethod;
 import com.azure.core.http.HttpPipeline;
 import com.azure.core.http.HttpPipelineBuilder;
-import com.azure.core.http.HttpRequest;
-import com.azure.core.http.HttpResponse;
 import com.azure.core.util.CoreUtils;
 import com.azure.dev.models.Variable;
 import com.google.common.collect.Maps;
-import org.yaml.snakeyaml.Yaml;
 
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Scanner;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  */
 public class SwaggerLiteReleaseMetadata extends LiteReleaseMetadata {
-    private static final int LITE_CODEGEN_PIPELINE_ID = 2238;
     private static final HttpPipeline HTTP_PIPELINE = new HttpPipelineBuilder().build();
     private static final boolean PREFER_STABLE_TAG = false;
-    private static final String API_SPECS_YAML_PATH = "https://raw.githubusercontent.com/Azure/azure-sdk-for-java/main/eng/mgmt/automation/api-specs.yaml";
     private static final InputStream IN = System.in;
     private static final PrintStream OUT = System.out;
     private final String sdk;
@@ -39,7 +29,7 @@ public class SwaggerLiteReleaseMetadata extends LiteReleaseMetadata {
         super(configure);
 
         swagger = configure.getSwagger();
-        String sdk = getSdkName(swagger);
+        String sdk = Utils.getSdkName(swagger);
         if (!CoreUtils.isNullOrEmpty(configure.getService())) {
             sdk = configure.getService();
         }
@@ -130,47 +120,5 @@ public class SwaggerLiteReleaseMetadata extends LiteReleaseMetadata {
     @Override
     public String sdkName() {
         return this.sdk;
-    }
-
-    @Override
-    public int generationPipelineId() {
-        return LITE_CODEGEN_PIPELINE_ID;
-    }
-
-    private static String getSdkName(String swaggerName) {
-        Matcher matcher = Pattern.compile("specification/([^/]+)/resource-manager(/.*)*/readme.md")
-                .matcher(swaggerName);
-        if (matcher.matches()) {
-            swaggerName = matcher.group(1);
-            String subspec = matcher.group(2);
-            if (!CoreUtils.isNullOrEmpty(subspec)) {
-                swaggerName += subspec;
-            }
-        }
-
-        HttpRequest request = new HttpRequest(HttpMethod.GET, API_SPECS_YAML_PATH);
-        HttpResponse response = HTTP_PIPELINE.send(request).block();
-        if (response.getStatusCode() == 200) {
-            String configYaml = response.getBodyAsString().block();
-            response.close();
-
-            Yaml yaml = new Yaml();
-            Map<String, Object> config = yaml.load(configYaml);
-
-            String sdkName = swaggerName;
-            if (config.containsKey(swaggerName)) {
-                Map<String, String> detail = (Map<String, String>) config.get(swaggerName);
-                if (detail.containsKey("service")) {
-                    sdkName = detail.get("service");
-                }
-            }
-
-            sdkName = sdkName.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "");
-
-            return sdkName;
-        } else {
-            response.close();
-            throw new HttpResponseException(response);
-        }
     }
 }

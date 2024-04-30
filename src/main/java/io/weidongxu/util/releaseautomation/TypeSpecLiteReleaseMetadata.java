@@ -1,37 +1,40 @@
 package io.weidongxu.util.releaseautomation;
 
+import com.azure.core.util.CoreUtils;
 import com.azure.dev.models.Variable;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
  */
 public class TypeSpecLiteReleaseMetadata extends LiteReleaseMetadata {
+    private final String tspConfig;
     protected TypeSpecLiteReleaseMetadata(Configure configure) {
         super(configure);
+        tspConfig = configure.getTspConfig();
     }
 
     @Override
     public Map<String, Variable> generationPipelineVariables() {
-        // TODO (xiaofeicao, 2024-04-29 17:38)
-        throw new UnsupportedOperationException("method [generationPipelineVariables] not implemented in class [io.weidongxu.util.releaseautomation.TypeSpecLiteReleaseMetadata]");
+        Map<String, Variable> variableMap = new HashMap<>();
+        variableMap.put("TSP_CONFIG", new Variable().withValue(tspConfig));
+        variableMap.put("VERSION", new Variable().withValue(configure.getVersion()));
+        variableMap.put("README", new Variable().withValue(sdkName()));
+        return variableMap;
     }
 
     @Override
     public String generationSource() {
-        // TODO (xiaofeicao, 2024-04-29 17:38)
-        throw new UnsupportedOperationException("method [generationSource] not implemented in class [io.weidongxu.util.releaseautomation.TypeSpecLiteReleaseMetadata]");
+        return configure.getSwagger();
     }
 
     @Override
     public String sdkName() {
-        // TODO (xiaofeicao, 2024-04-29 17:38)
-        throw new UnsupportedOperationException("method [sdkName] not implemented in class [io.weidongxu.util.releaseautomation.TypeSpecLiteReleaseMetadata]");
-    }
-
-    @Override
-    public int generationPipelineId() {
-        // TODO (xiaofeicao, 2024-04-29 17:52)
-        throw new UnsupportedOperationException("method [generationPipelineId] not implemented in class [io.weidongxu.util.releaseautomation.TypeSpecLiteReleaseMetadata]");
+        if (!CoreUtils.isNullOrEmpty(configure.getService())) {
+            return configure.getService();
+        } else {
+            return Utils.getSdkName(configure.getSwagger());
+        }
     }
 }
